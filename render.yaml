@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ollama-openai-proxy
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: "python server.py"
+    envVars:
+      - key: OLLAMA_API_KEY
+        sync: false   # add your key in Render dashboard
