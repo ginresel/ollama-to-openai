@@ -1,26 +1,29 @@
 from flask import Flask, request, jsonify, Response
 import requests
 import os
+import uuid
+import time
 
 app = Flask(__name__)
 
-OLLAMA_API = "https://ollama.com/api/chat"  # Turbo endpoint
+OLLAMA_API = "https://ollama.com/api/chat"
 
 
 @app.route("/v1/chat/completions", methods=["POST"])
 def chat_completions():
     data = request.get_json()
 
-    # Convert OpenAI-style -> Ollama-style
+    # Get OpenAI-style input
     messages = data.get("messages", [])
     model = data.get("model", "gpt-oss:20b")
     stream = data.get("stream", False)
 
-    # Get user-provided API key (Authorization: Bearer xxx)
+    # Forward user's own API key
     auth_header = request.headers.get("Authorization", "")
+
     headers = {
         "Content-Type": "application/json",
-        "Authorization": auth_header,  # forward directly
+        "Authorization": auth_header,
     }
 
     payload = {
@@ -32,11 +35,15 @@ def chat_completions():
     resp = requests.post(OLLAMA_API, headers=headers, json=payload, stream=stream)
 
     if stream:
-        # Stream Ollama chunks back as OpenAI-style SSE
+        # Stream Ollama → OpenAI-style SSE
         def generate():
             for line in resp.iter_lines():
                 if line:
-                    yield f"data: {line.decode('utf-8')}\n\n"
+                    try:
+                        ollama_chunk = line.decode("utf-8")
+                        yield f"data: {ollama_chunk}\n\n"
+                    except Exception:
+                        continue
             yield "data: [DONE]\n\n"
 
         return Response(generate(), mimetype="text/event-stream")
@@ -44,16 +51,22 @@ def chat_completions():
     else:
         ollama_json = resp.json()
 
-        # Convert Ollama response -> OpenAI response shape
+        # Convert Ollama → OpenAI response
         return jsonify({
-            "id": "chatcmpl-proxy",
+            "id": f"chatcmpl-{uuid.uuid4()}",
             "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
             "choices": [{
                 "index": 0,
                 "message": ollama_json.get("message", {}),
                 "finish_reason": "stop"
             }],
-            "model": model,
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+            }
         })
 
 
