@@ -1,11 +1,11 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import requests
 import os
 
 app = Flask(__name__)
 
 OLLAMA_API = "https://ollama.com/api/chat"  # Turbo endpoint
-OLLAMA_KEY = os.getenv("OLLAMA_API_KEY", "")
+
 
 @app.route("/v1/chat/completions", methods=["POST"])
 def chat_completions():
@@ -16,9 +16,11 @@ def chat_completions():
     model = data.get("model", "gpt-oss:20b")
     stream = data.get("stream", False)
 
+    # Get user-provided API key (Authorization: Bearer xxx)
+    auth_header = request.headers.get("Authorization", "")
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {OLLAMA_KEY}",
+        "Authorization": auth_header,  # forward directly
     }
 
     payload = {
@@ -30,14 +32,14 @@ def chat_completions():
     resp = requests.post(OLLAMA_API, headers=headers, json=payload, stream=stream)
 
     if stream:
-        # Stream Ollama chunks back as OpenAI-style chunks
+        # Stream Ollama chunks back as OpenAI-style SSE
         def generate():
             for line in resp.iter_lines():
                 if line:
                     yield f"data: {line.decode('utf-8')}\n\n"
             yield "data: [DONE]\n\n"
 
-        return app.response_class(generate(), mimetype="text/event-stream")
+        return Response(generate(), mimetype="text/event-stream")
 
     else:
         ollama_json = resp.json()
